@@ -33,6 +33,7 @@ typedef struct s_params
     pthread_mutex_t *forks;
     pthread_mutex_t mtx_print;
     pthread_mutex_t mtx_meal;
+    pthread_mutex_t mtx_last_meal;
     pthread_mutex_t mtx_alive;
     pthread_mutex_t mtx_time;
     pthread_mutex_t mtx_full_meal;

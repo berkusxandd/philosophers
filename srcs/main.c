@@ -1,31 +1,47 @@
 #include "../includes/philo.h"
 
+void set_all_alive(t_params *params)
+{
+    pthread_mutex_lock(&params->mtx_alive);
+    params->all_alive = 0;
+    pthread_mutex_unlock(&params->mtx_alive);   
+}
+long long get_last_meal(t_params *params, int i)
+{
+    long long last_meal;
+
+    pthread_mutex_lock(&params->mtx_last_meal);
+    last_meal = current_timestamp() - params->philosophers[i].last_meal;
+    pthread_mutex_unlock(&params->mtx_last_meal);
+    return last_meal;
+}
+
 void *monitor_routine(void *params_ptr)
 {
     t_params *params = (t_params *)params_ptr;
-    
+    long long last_meal;
     int i;
+    
     i = 0;
     while (1)
     {
         while (i < params->n_philo)
         {
-            long long last_meal = current_timestamp() - params->philosophers[i].last_meal;
+            last_meal = get_last_meal(params, i);
             if (last_meal >= params->t_die)
             {
                 print_state(&params->philosophers[i], "died");
-                pthread_mutex_lock(&params->mtx_alive);
-                params->all_alive = 0;
-                pthread_mutex_unlock(&params->mtx_alive);
+                set_all_alive(params);
                 return NULL;
             }
+            pthread_mutex_lock(&params->mtx_meal);
             if (params->meals_to_finish == params->n_philo)
             {
-                pthread_mutex_lock(&params->mtx_alive);
-                params->all_alive = 0;
-                pthread_mutex_unlock(&params->mtx_alive);
+                set_all_alive(params);
+                pthread_mutex_unlock(&params->mtx_meal);
                 return NULL;
             }
+            pthread_mutex_unlock(&params->mtx_meal);
             i++;
         }
         i = 0;
@@ -63,18 +79,18 @@ void print_state(t_philosopher *philo, char *state)
 
 void lock_forks(t_philosopher *philo)
 {
-     if (philo->id % 2 == 0 && philo->params->all_alive != 0)
+    if (philo->id % 2 == 0 && philo->params->all_alive != 0)
     {
+
+        pthread_mutex_lock(philo->left_fork);
+        pthread_mutex_lock(philo->right_fork);
+
+    }
+    if (philo->id % 2 != 0 && philo->params->all_alive != 0)
+    {
+        usleep(50);
         pthread_mutex_lock(philo->right_fork);
         pthread_mutex_lock(philo->left_fork);
-    }
-    else if (philo->id % 2 != 0 && philo->params->all_alive != 0)
-    {
-        if (philo->left_fork != philo->right_fork)
-        {
-            pthread_mutex_lock(philo->left_fork);
-            pthread_mutex_lock(philo->right_fork);
-        }
     }
 }
 
@@ -102,16 +118,34 @@ void eat_monitor(t_philosopher *philo)
 
 void eat(t_philosopher *philo)
 {
-
+    pthread_mutex_lock(&philo->params->mtx_alive);
     if (philo->params->all_alive != 1)
+    {
+        pthread_mutex_unlock(&philo->params->mtx_alive);
         return ;
+    }
+    pthread_mutex_unlock(&philo->params->mtx_alive);
     lock_forks(philo);
+    pthread_mutex_lock(&philo->params->mtx_alive);
     if (philo->params->all_alive != 1)
+    {
+        pthread_mutex_unlock(&philo->params->mtx_alive);
+        pthread_mutex_unlock(philo->right_fork);
+        pthread_mutex_unlock(philo->left_fork);
+
         return;
+    } 
+    pthread_mutex_unlock(&philo->params->mtx_alive);
     if (philo->left_fork == philo->right_fork)
-        return ;
+    {
+        pthread_mutex_unlock(philo->right_fork);
+        pthread_mutex_unlock(philo->left_fork);
+        return;
+    } 
     eat_monitor(philo);
+    pthread_mutex_lock(&philo->params->mtx_last_meal);
     philo->last_meal = current_timestamp();
+    pthread_mutex_unlock(&philo->params->mtx_last_meal);
     usleep(philo->params->t_eat * 1000);
     finish_eat(philo);
     usleep(100);
@@ -120,16 +154,26 @@ void eat(t_philosopher *philo)
 void *philosopher_routine(void *philosopher)
 {
     t_philosopher *philo = (t_philosopher *)philosopher;
+    print_state(philo, "is thinking");
     while (1)
     {
         eat(philo);
+        pthread_mutex_lock(&philo->params->mtx_alive);
         if (!philo->params->all_alive)
-            break;
-
+        {
+            pthread_mutex_unlock(&philo->params->mtx_alive);
+            return NULL;
+        }
+        pthread_mutex_unlock(&philo->params->mtx_alive);
         print_state(philo, "is sleeping");
-        usleep(philo->params->t_sleep * 1000);        
+        philo_sleep((long long)philo->params->t_sleep);        
+        pthread_mutex_lock(&philo->params->mtx_alive);
         if (!philo->params->all_alive)
+        {
+            pthread_mutex_unlock(&philo->params->mtx_alive);
             break;
+        }
+        pthread_mutex_unlock(&philo->params->mtx_alive);
         print_state(philo, "is thinking");
         usleep(100);
     }
@@ -213,6 +257,7 @@ void mtx_init(t_params *params)
     i = 0;
     pthread_mutex_init(&params->mtx_print, NULL);
     pthread_mutex_init(&params->mtx_meal, NULL);
+    pthread_mutex_init(&params->mtx_last_meal, NULL);
     pthread_mutex_init(&params->mtx_alive, NULL);
     pthread_mutex_init(&params->mtx_full_meal, NULL);
     params->forks = malloc(sizeof(pthread_mutex_t) * params->n_philo);
@@ -237,6 +282,7 @@ void clean_exit(t_philosopher *philosophers, t_params *params)
     pthread_mutex_destroy(&params->mtx_meal);
     pthread_mutex_destroy(&params->mtx_alive);
     pthread_mutex_destroy(&params->mtx_full_meal);
+    pthread_mutex_destroy(&params->mtx_last_meal);
     free(params->forks);
     free(philosophers);
 }
