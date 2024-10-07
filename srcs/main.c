@@ -6,6 +6,13 @@ void set_all_alive(t_params *params)
     params->all_alive = 0;
     pthread_mutex_unlock(&params->mtx_alive);   
 }
+
+void set_last_meal(t_philosopher *philo)
+{
+    pthread_mutex_lock(&philo->params->mtx_last_meal);
+    philo->last_meal = current_timestamp();
+    pthread_mutex_unlock(&philo->params->mtx_last_meal);
+}
 long long get_last_meal(t_params *params, int i)
 {
     long long last_meal;
@@ -21,7 +28,7 @@ void *monitor_routine(void *params_ptr)
     t_params *params = (t_params *)params_ptr;
     long long last_meal;
     int i;
-    
+
     i = 0;
     while (1)
     {
@@ -116,6 +123,12 @@ void eat_monitor(t_philosopher *philo)
     print_state(philo, "is eating");
 }
 
+void unlock_forks(t_philosopher *philo)
+{
+    pthread_mutex_unlock(philo->right_fork);
+    pthread_mutex_unlock(philo->left_fork);
+}
+
 void eat(t_philosopher *philo)
 {
     pthread_mutex_lock(&philo->params->mtx_alive);
@@ -130,22 +143,17 @@ void eat(t_philosopher *philo)
     if (philo->params->all_alive != 1)
     {
         pthread_mutex_unlock(&philo->params->mtx_alive);
-        pthread_mutex_unlock(philo->right_fork);
-        pthread_mutex_unlock(philo->left_fork);
-
+        unlock_forks(philo);
         return;
     } 
     pthread_mutex_unlock(&philo->params->mtx_alive);
     if (philo->left_fork == philo->right_fork)
     {
-        pthread_mutex_unlock(philo->right_fork);
-        pthread_mutex_unlock(philo->left_fork);
+        unlock_forks(philo);
         return;
     } 
     eat_monitor(philo);
-    pthread_mutex_lock(&philo->params->mtx_last_meal);
-    philo->last_meal = current_timestamp();
-    pthread_mutex_unlock(&philo->params->mtx_last_meal);
+    set_last_meal(philo);
     usleep(philo->params->t_eat * 1000);
     finish_eat(philo);
     usleep(100);
